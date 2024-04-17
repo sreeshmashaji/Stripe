@@ -13,7 +13,7 @@ fetch("/config")
 
     //console.log( ' >>> Product = ' + product );
     //return false;
-
+   console.log("proo",product)
     // Get Checkout Session ID
     fetch("/create-checkout-session/" + product)
     .then((result) => { return result.json(); })

@@ -16,6 +16,8 @@ stripe_keys = {
     "endpoint_secret": settings.stripe_secret_key
 }
 
+# print(stripe_keys)
+
 stripe.api_key = stripe_keys["secret_key"]  
 
 @router.get("/stripe_login")
@@ -24,6 +26,7 @@ def stripe_login(request: Request):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing a Required Credential, Stripe Client ID, check your environment variables")
 
     stripe_login_url = f'https://connect.stripe.com/oauth/authorize?response_type=code&client_id={settings.stripe_client_id}&scope=read_write&redirect_uri={settings.stripe_oauth_redirect}'
+    print(stripe_login_url)
     redirect = RedirectResponse(url=stripe_login_url)
 
     return redirect

@@ -17,6 +17,12 @@ if (settings.debug=='True'):
 else:
     app = FastAPI()
 
+class State:
+    def __init__(self):
+        self.stripe_customer_id = None
+
+app.state = State()
+
 app.mount("/static", StaticFiles(directory="src/static"), name="static")
 
 app.include_router(ui_router)

@@ -10,7 +10,9 @@ from pathlib import Path
 from src.config import settings
 import http3
 import stripe
-import json
+import json,time
+from http import HTTPStatus
+
 
 
 from src import app, schemas
@@ -29,7 +31,7 @@ stripe_keys = {
     "endpoint_secret": settings.stripe_secret_key
 }
 
-
+print( settings.server_address)
 
 @router.get("/", status_code=status.HTTP_200_OK)
 async def index(request: Request, response_model=HTMLResponse):
@@ -141,17 +143,101 @@ def cancelled(request: Request):
     })
 
 
+
+
+# def get_or_create_product_price(product_name, unit_amount, currency="usd"):
+#     try:
+#         # Retrieve all products from Stripe
+#         all_products = stripe.Product.list()
+        
+#         # Check if the product already exists in Stripe based on some identifier (e.g., product name)
+#         existing_product = next((p for p in all_products.data if p.name == product_name), None)
+        
+#         if existing_product:
+#             # If the product exists, retrieve its ID
+#             product_id = existing_product.id
+#         else:
+#             # If the product doesn't exist, create it in Stripe
+#             product = stripe.Product.create(name=product_name, type="service")
+#             product_id = product.id
+        
+#         # Check if the price already exists for the product
+#         existing_price = stripe.Price.list(product=product_id, limit=1, active=True)
+#         if existing_price and existing_price.data:
+#             price_id = existing_price.data[0].id
+#         else:
+#             # If the price doesn't exist, create it in Stripe
+#             price = stripe.Price.create(
+#                 unit_amount=unit_amount,
+#                 currency=currency,
+#                 product=product_id,
+#                 recurring={"interval": "month"},  # Adjust recurring settings as needed
+#                 type="recurring",  # Adjust type if needed (e.g., 'one_time' for one-time purchases)
+#             )
+#             price_id = price.id
+        
+#         return price_id
+#     except stripe.error.StripeError as e:
+#         # Handle any Stripe API errors
+#         print(f"Stripe API error: {e}")
+#         return None
+#     except Exception as e:
+#         # Handle any other errors
+#         print(f"Error: {e}")
+#         return None
+
+def get_or_create_product_price(product_name, unit_amount, currency="usd"):
+    try:
+        
+        all_products = stripe.Product.list()
+        
+        
+        existing_product = next((p for p in all_products.data if p.name == product_name), None)
+        
+        if existing_product:
+            
+            product_id = existing_product.id
+        else:
+            
+            product = stripe.Product.create(name=product_name)
+            product_id = product.id
+        
+        
+        existing_price = stripe.Price.list(product=product_id, limit=1, active=True)
+        if existing_price and existing_price.data:
+            price_id = existing_price.data[0].id
+        else:
+            # If the price doesn't exist, create it in Stripe
+            price = stripe.Price.create(
+                unit_amount=unit_amount,
+                currency=currency,
+                product=product_id,
+            )
+            price_id = price.id
+        
+        return price_id
+    except stripe.error.StripeError as e:
+        # Handle any Stripe API errors
+        print(f"Stripe API error: {e}")
+        return None
+    except Exception as e:
+        # Handle any other errors
+        print(f"Error: {e}")
+        return None
+
+
 @router.get("/create-checkout-session/{path}/")
 async def create_checkout_session(path, request: Request):
+    print("enterrrr",path)
     base_url = request.base_url
     product_url = app.product_router.url_path_for("get_product_by_slug", slug=path)
     request_url = base_url.__str__() + product_url.__str__()[1:]
-
+    print("req",request_url)
     http3client = http3.AsyncClient()
     response = await http3client.get(request_url)
-
+    print("response",response)
     product = response.json()
-
+    # print("pro",product)
 
     domain_url = settings.server_address
     stripe.api_key = stripe_keys["secret_key"]
@@ -166,25 +252,117 @@ async def create_checkout_session(path, request: Request):
         # For full details see https:#stripe.com/docs/api/checkout/sessions/create
 
         # ?session_id={CHECKOUT_SESSION_ID} means the redirect will have the session ID set as a query param 
-
+        # if not app.state.stripe_customer_id:
+        #     customer = stripe.Customer.create(
+        #         description="Demo customer",
+        #     )
+        #     app.state.stripe_customer_id = customer["id"]
+        price_id=get_or_create_product_price(product['name'],product["price"])
+        # price_id="price_1P642MSIWafKYQ7MQ5rv8agE"
         checkout_session = stripe.checkout.Session.create(
-            success_url=domain_url + "success?session_id={CHECKOUT_SESSION_ID}",
-            cancel_url=domain_url + "cancelled",
+            # customer=app.state.stripe_customer_id,
+            
+            success_url="http://localhost:8002/" + "success?session_id={CHECKOUT_SESSION_ID}",
+            cancel_url="http://localhost:8002/" + "cancelled",
             payment_method_types=["card"],
             mode="payment",
+            # mode="subscription",
+            
             line_items=[
                 {
-                    "name": product['name'],
+                    # "name": product['name'],
                     "quantity": 1,
-                    "currency": 'usd',
-                    "amount": product['price'] * 100,
+                    # "currency": 'usd',
+                    "price": price_id,
                 }
-            ]
+            ],
         )
+        print("sessionid",checkout_session["id"])
         return ({"sessionId": checkout_session["id"]})
     except Exception as e:
+        print(e)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='There was an error with the stripe session')
-        
+
+    # @router.get("/create-checkout-session/{path}/")
+    # async def create_checkout_session(path, request: Request):
+    #     try:
+    #         base_url = request.base_url
+    #         product_url = app.product_router.url_path_for("get_product_by_slug", slug=path)
+    #         request_url = base_url.__str__() + product_url.__str__()[1:]
+
+    #         http3client = http3.AsyncClient()
+    #         response = await http3client.get(request_url)
+    #         product = response.json()
+
+    #         domain_url = settings.server_address
+    #         stripe.api_key = stripe_keys["secret_key"]
+
+    #         # Retrieve or create the product price in Stripe and get its price ID
+    #         price_id = get_or_create_product_price(product['name'], product["price"])
+
+    #         # Create a checkout session with the retrieved price ID
+    #         checkout_session = stripe.checkout.Session.create(
+    #             success_url=domain_url + "success?session_id={CHECKOUT_SESSION_ID}",
+    #             cancel_url=domain_url + "cancelled",
+    #             payment_method_types=["card"],
+    #             mode="subscription",
+    #             line_items=[
+    #                 {
+    #                     "quantity": 1,
+    #                     "price": price_id,  # Use the retrieved price ID
+    #                 }
+    #             ],
+    #         )
+
+    #         return {"sessionId": checkout_session["id"]}
+    #     except Exception as e:
+    #         print(e)
+    #         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='There was an error with the stripe session')
+
+
+
+# @router.get("/create-checkout-session/{path}/")
+# async def create_checkout_session(path: str, request: Request):
+#   try:
+#     base_url = request.base_url
+#     product_url = app.product_router.url_path_for("get_product_by_slug", slug=path)
+#     request_url = str(base_url) + str(product_url)[1:]
+
+#     async with http3.AsyncClient() as http3client:
+#       response = await http3client.get(request_url)
+#       product = response.json()
+
+#     stripe.api_key = stripe_keys["secret_key"]
+
+#     # Get the price ID or handle missing price
+#     # price_id = get_or_create_product_price(product['name'], product["price"])
+#     price_id="price_1P642MSIWafKYQ7MQ5rv8agE"
+#     if not price_id:
+#       raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to create product price")
+
+#     # Create a checkout session with the retrieved price ID
+#     checkout_session = stripe.checkout.Session.create(
+#       success_url=settings["server_address"] + "success?session_id={CHECKOUT_SESSION_ID}",
+#       cancel_url=settings["server_address"] + "cancelled",
+#       payment_method_types=["card"],
+#       mode="payment",
+#       line_items=[
+#         {
+#           "quantity": 1,
+#           "price": price_id,
+#         }
+#       ],
+#     )
+
+#     return {"sessionId": checkout_session["id"]}
+#   except Exception as e:
+#     print(e)
+#     raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail='There was an error with the stripe session')
+
+
+
+
+
 
 @router.get("/success")
 def success(request: Request):
